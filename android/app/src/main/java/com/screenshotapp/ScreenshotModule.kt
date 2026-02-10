@@ -62,6 +62,11 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
+    fun isServiceRunning(promise: Promise) {
+        promise.resolve(OverlayService.isRunning)
+    }
+
+    @ReactMethod
     fun requestOverlayPermission() {
         val intent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,

@@ -17,9 +17,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const bottomSheetRef = useRef<BottomSheetLib>(null);
     const appState = useRef(AppState.currentState);
 
-    useEffect(() => { loadScreenshots(); loadSettings(); }, []);
+    useEffect(() => { loadScreenshots(); loadSettings(); checkServiceState(); }, []);
 
-    // Listen for app coming back to foreground (after granting overlay permission)
+    // Listen for app coming back to foreground
     useEffect(() => {
         const subscription = AppState.addEventListener('change', handleAppStateChange);
         return () => subscription.remove();
@@ -48,10 +48,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
         if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-            // App came back — refresh screenshots and check permissions
             loadScreenshots();
+            checkServiceState();
         }
         appState.current = nextAppState;
+    };
+
+    const checkServiceState = async () => {
+        const running = await NativeScreenshot.isServiceRunning();
+        setIsCapturing(running);
     };
 
     const loadSettings = async () => setSettings(await StorageService.getSettings());
@@ -73,16 +78,21 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         if (method === 'onscreen') {
             await startOverlayCapture();
         } else {
-            // Timer method
+            // Timer method — just take a screenshot after delay, no overlay needed
             const duration = settings?.timerDuration || 3;
-            Alert.alert('Timer Screenshot', `Screenshot will be taken in ${duration} seconds.`, [
+            Alert.alert('Timer Screenshot', `Screenshot will be taken in ${duration} seconds.\n\nMinimize the app before the timer ends to capture what's on screen.`, [
                 { text: 'Cancel', style: 'cancel' },
                 {
-                    text: 'Start', onPress: async () => {
-                        // Start capture, then after delay stop it
+                    text: 'Start Timer', onPress: async () => {
                         const hasOverlay = await NativeScreenshot.checkOverlayPermission();
                         if (!hasOverlay) {
                             promptOverlayPermission();
+                            return;
+                        }
+                        // Check if already running
+                        const running = await NativeScreenshot.isServiceRunning();
+                        if (running) {
+                            Alert.alert('Already Active', 'The screenshot button is already active on your screen. Tap it to capture.');
                             return;
                         }
                         await NativeScreenshot.startScreenCapture();
@@ -93,15 +103,25 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     };
 
     const startOverlayCapture = async () => {
+        // Check if already running
+        const running = await NativeScreenshot.isServiceRunning();
+        if (running) {
+            Alert.alert(
+                'Already Active',
+                'The floating screenshot button is already on your screen.\n\n• Tap it to capture a screenshot\n• Drag it to the trash bin to dismiss it',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
         // Check overlay permission
         const hasOverlay = await NativeScreenshot.checkOverlayPermission();
-
         if (!hasOverlay) {
             promptOverlayPermission();
             return;
         }
 
-        // Start screen capture (shows MediaProjection dialog, then starts overlay)
+        // Start screen capture
         const started = await NativeScreenshot.startScreenCapture();
         if (!started) {
             Alert.alert('Error', 'Failed to start screen capture. Please try again.');
@@ -111,13 +131,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const promptOverlayPermission = () => {
         Alert.alert(
             'Overlay Permission Required',
-            'To show the floating screenshot button over other apps, you need to grant overlay permission.\n\nYou will be taken to Android settings. Find "ScreenshotApp" and enable "Allow display over other apps".',
+            'To show the floating screenshot button over other apps, you need to grant overlay permission.\n\nFind "ScreenshotApp" and enable "Allow display over other apps".',
             [
                 { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Open Settings',
-                    onPress: () => NativeScreenshot.requestOverlayPermission(),
-                },
+                { text: 'Open Settings', onPress: () => NativeScreenshot.requestOverlayPermission() },
             ]
         );
     };
@@ -131,9 +148,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const handleSettingsPress = () => navigation?.navigate('Settings');
     const handleMenuPress = () => {
         if (isCapturing) {
-            Alert.alert('Capture Running', 'The floating button is active.', [
+            Alert.alert('Capture Running', 'The floating screenshot button is active on your screen.', [
                 { text: 'Keep Running' },
-                { text: 'Stop Capture', style: 'destructive', onPress: handleStopCapture },
+                { text: 'Stop & Remove', style: 'destructive', onPress: handleStopCapture },
             ]);
         } else {
             Alert.alert('Menu', 'Menu options will be available here.');

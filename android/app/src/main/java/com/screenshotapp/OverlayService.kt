@@ -4,8 +4,8 @@ import android.app.*
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.PixelFormat
+import android.graphics.*
+import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -15,6 +15,7 @@ import android.os.*
 import android.provider.MediaStore
 import android.util.DisplayMetrics
 import android.view.*
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -28,25 +29,31 @@ class OverlayService : Service() {
         private const val CHANNEL_ID = "screenshot_overlay_channel"
         private const val NOTIFICATION_ID = 1
         private const val VIRTUAL_DISPLAY_NAME = "ScreenCapture"
+        var isRunning = false
+            private set
     }
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
+    private var trashView: View? = null
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
     private var screenWidth = 0
     private var screenHeight = 0
     private var screenDensity = 0
+    private var isCapturing = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         createNotificationChannel()
 
         val metrics = DisplayMetrics()
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(metrics)
         screenWidth = metrics.widthPixels
         screenHeight = metrics.heightPixels
@@ -91,20 +98,39 @@ class OverlayService : Service() {
         )
     }
 
+    private fun createCircleDrawable(color: Int, size: Int): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(color)
+            setSize(size, size)
+        }
+    }
+
     private fun showOverlayButton() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        // Create the floating button
-        val button = ImageView(this).apply {
-            setImageResource(android.R.drawable.ic_menu_camera)
-            setBackgroundResource(android.R.drawable.btn_default)
-            setPadding(24, 24, 24, 24)
-            alpha = 0.85f
-            elevation = 12f
-        }
+        // Create the floating button with blue theme
+        val buttonSize = 150
+        val container = FrameLayout(this)
 
-        // Create a custom circular background
-        val buttonSize = 140
+        // Blue circle background
+        val blueColor = Color.parseColor("#3366CC")
+        val circleBackground = createCircleDrawable(blueColor, buttonSize)
+        container.background = circleBackground
+        container.elevation = 16f
+
+        // Camera icon
+        val icon = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_camera)
+            setColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN)
+            val padding = buttonSize / 4
+            setPadding(padding, padding, padding, padding)
+        }
+        container.addView(icon, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+
         val params = WindowManager.LayoutParams(
             buttonSize,
             buttonSize,
@@ -124,8 +150,9 @@ class OverlayService : Service() {
         var initialTouchX = 0f
         var initialTouchY = 0f
         var isDragging = false
+        var isOverTrash = false
 
-        button.setOnTouchListener { view, event ->
+        container.setOnTouchListener { view, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
@@ -133,35 +160,132 @@ class OverlayService : Service() {
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     isDragging = false
+                    isOverTrash = false
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - initialTouchX
                     val dy = event.rawY - initialTouchY
                     if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-                        isDragging = true
+                        if (!isDragging) {
+                            isDragging = true
+                            showTrashZone()
+                        }
                     }
                     params.x = initialX + dx.toInt()
                     params.y = initialY + dy.toInt()
                     windowManager?.updateViewLayout(view, params)
+
+                    // Check if over trash zone (bottom center of screen)
+                    val buttonCenterX = params.x + buttonSize / 2
+                    val buttonCenterY = params.y + buttonSize / 2
+                    val trashZoneTop = screenHeight - 300
+                    val trashZoneLeft = screenWidth / 2 - 150
+                    val trashZoneRight = screenWidth / 2 + 150
+                    val newOverTrash = buttonCenterY > trashZoneTop &&
+                            buttonCenterX > trashZoneLeft &&
+                            buttonCenterX < trashZoneRight
+
+                    if (newOverTrash != isOverTrash) {
+                        isOverTrash = newOverTrash
+                        updateTrashHighlight(isOverTrash)
+                        // Scale button when over trash
+                        view.scaleX = if (isOverTrash) 0.7f else 1f
+                        view.scaleY = if (isOverTrash) 0.7f else 1f
+                        view.alpha = if (isOverTrash) 0.5f else 1f
+                    }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!isDragging) {
+                    hideTrashZone()
+                    if (isOverTrash) {
+                        // Dropped on trash — stop the service
+                        stopSelf()
+                    } else if (!isDragging) {
                         // It's a tap — take screenshot
-                        captureScreen(view, params)
+                        if (!isCapturing) {
+                            captureScreen(view, params)
+                        }
                     }
+                    // Reset visual
+                    view.scaleX = 1f
+                    view.scaleY = 1f
+                    view.alpha = 1f
                     true
                 }
                 else -> false
             }
         }
 
-        overlayView = button
-        windowManager?.addView(button, params)
+        overlayView = container
+        windowManager?.addView(container, params)
+    }
+
+    private fun showTrashZone() {
+        if (trashView != null) return
+
+        val trashContainer = FrameLayout(this)
+
+        // Red circle with trash icon
+        val trashSize = 160
+        val trashBg = createCircleDrawable(Color.parseColor("#40FF0000"), trashSize)
+        trashContainer.background = trashBg
+
+        val trashIcon = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_delete)
+            setColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN)
+            val padding = trashSize / 4
+            setPadding(padding, padding, padding, padding)
+        }
+        trashContainer.addView(trashIcon, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+
+        val params = WindowManager.LayoutParams(
+            trashSize,
+            trashSize,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = screenWidth / 2 - trashSize / 2
+            y = screenHeight - trashSize - 120
+        }
+
+        trashView = trashContainer
+        windowManager?.addView(trashContainer, params)
+    }
+
+    private fun updateTrashHighlight(highlighted: Boolean) {
+        trashView?.let { view ->
+            val trashSize = 160
+            if (highlighted) {
+                view.background = createCircleDrawable(Color.parseColor("#CCFF0000"), trashSize)
+                view.scaleX = 1.3f
+                view.scaleY = 1.3f
+            } else {
+                view.background = createCircleDrawable(Color.parseColor("#40FF0000"), trashSize)
+                view.scaleX = 1f
+                view.scaleY = 1f
+            }
+        }
+    }
+
+    private fun hideTrashZone() {
+        trashView?.let {
+            try { windowManager?.removeView(it) } catch (_: Exception) {}
+        }
+        trashView = null
     }
 
     private fun captureScreen(buttonView: View, buttonParams: WindowManager.LayoutParams) {
+        if (isCapturing) return
+        isCapturing = true
+
         // Hide the button so it doesn't appear in the screenshot
         buttonView.visibility = View.INVISIBLE
 
@@ -170,8 +294,9 @@ class OverlayService : Service() {
             performCapture {
                 // Show the button again after capture
                 buttonView.visibility = View.VISIBLE
+                isCapturing = false
             }
-        }, 150)
+        }, 200)
     }
 
     private fun performCapture(onComplete: () -> Unit) {
@@ -180,14 +305,12 @@ class OverlayService : Service() {
             return
         }
 
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            VIRTUAL_DISPLAY_NAME,
-            screenWidth, screenHeight, screenDensity,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            reader.surface, null, null
-        )
-
+        // Set up the listener BEFORE creating the virtual display
+        var captured = false
         reader.setOnImageAvailableListener({ imgReader ->
+            if (captured) return@setOnImageAvailableListener
+            captured = true
+
             val image = imgReader.acquireLatestImage()
             if (image != null) {
                 try {
@@ -214,7 +337,7 @@ class OverlayService : Service() {
                     croppedBitmap.recycle()
 
                     Handler(Looper.getMainLooper()).post {
-                        Toast.makeText(this, "Screenshot saved!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "✓ Screenshot saved!", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -223,18 +346,25 @@ class OverlayService : Service() {
                     }
                 } finally {
                     image.close()
-                    virtualDisplay?.release()
-                    virtualDisplay = null
                 }
             }
 
-            // Remove listener after capture
+            // Stop the virtual display after single capture
+            virtualDisplay?.release()
+            virtualDisplay = null
             imgReader.setOnImageAvailableListener(null, null)
 
             Handler(Looper.getMainLooper()).post {
                 onComplete()
             }
         }, Handler(Looper.getMainLooper()))
+
+        virtualDisplay = mediaProjection?.createVirtualDisplay(
+            VIRTUAL_DISPLAY_NAME,
+            screenWidth, screenHeight, screenDensity,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            reader.surface, null, null
+        )
     }
 
     private fun saveBitmap(bitmap: Bitmap) {
@@ -292,7 +422,6 @@ class OverlayService : Service() {
     }
 
     private fun createNotification(): Notification {
-        // Create a stop intent
         val stopIntent = Intent(this, OverlayService::class.java).apply {
             action = "STOP"
         }
@@ -303,7 +432,7 @@ class OverlayService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Screenshot Ready")
-            .setContentText("Tap the floating button to capture. Drag to reposition.")
+            .setContentText("Tap floating button to capture. Drag to trash to dismiss.")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
@@ -317,8 +446,10 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isRunning = false
+        hideTrashZone()
         overlayView?.let {
-            windowManager?.removeView(it)
+            try { windowManager?.removeView(it) } catch (_: Exception) {}
         }
         overlayView = null
         virtualDisplay?.release()

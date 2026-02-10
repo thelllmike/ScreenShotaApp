@@ -7,26 +7,22 @@ const eventEmitter = Platform.OS === 'android' && ScreenshotModule
     : null;
 
 export const NativeScreenshot = {
-    /**
-     * Check if overlay permission is granted
-     */
     checkOverlayPermission: async (): Promise<boolean> => {
         if (Platform.OS !== 'android' || !ScreenshotModule) return false;
         return await ScreenshotModule.checkOverlayPermission();
     },
 
-    /**
-     * Open Android settings to grant overlay permission
-     */
+    isServiceRunning: async (): Promise<boolean> => {
+        if (Platform.OS !== 'android' || !ScreenshotModule) return false;
+        return await ScreenshotModule.isServiceRunning();
+    },
+
     requestOverlayPermission: (): void => {
         if (Platform.OS === 'android' && ScreenshotModule) {
             ScreenshotModule.requestOverlayPermission();
         }
     },
 
-    /**
-     * Start screen capture — shows MediaProjection dialog, then starts overlay service
-     */
     startScreenCapture: async (): Promise<boolean> => {
         if (Platform.OS !== 'android' || !ScreenshotModule) return false;
         try {
@@ -38,18 +34,12 @@ export const NativeScreenshot = {
         }
     },
 
-    /**
-     * Stop the overlay service and screen capture
-     */
     stopScreenCapture: (): void => {
         if (Platform.OS === 'android' && ScreenshotModule) {
             ScreenshotModule.stopScreenCapture();
         }
     },
 
-    /**
-     * Listen for capture events
-     */
     onCaptureStarted: (callback: () => void) => {
         return eventEmitter?.addListener('onCaptureStarted', callback);
     },
