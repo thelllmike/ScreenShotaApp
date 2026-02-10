@@ -34,6 +34,17 @@ export const NativeScreenshot = {
         }
     },
 
+    startTimerCapture: async (seconds: number, soundEnabled: boolean = true): Promise<boolean> => {
+        if (Platform.OS !== 'android' || !ScreenshotModule) return false;
+        try {
+            await ScreenshotModule.startTimerCapture(seconds, soundEnabled);
+            return true;
+        } catch (error) {
+            console.error('Failed to start timer capture:', error);
+            return false;
+        }
+    },
+
     updateSoundSetting: (soundEnabled: boolean): void => {
         if (Platform.OS === 'android' && ScreenshotModule) {
             ScreenshotModule.updateSoundSetting(soundEnabled);

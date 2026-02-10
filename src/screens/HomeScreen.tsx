@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, StyleSheet, Alert, AppState, AppStateStatus } from 'react-native';
 import BottomSheetLib from '@gorhom/bottom-sheet';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Header, ScreenshotGrid, FloatingActionButton, BottomSheet, ImageViewer } from '../components';
+import { Header, ScreenshotGrid, FloatingActionButton, BottomSheet, ImageViewer, TimerPicker } from '../components';
 import { ScreenshotService, StorageService, NativeScreenshot } from '../services';
 import { Screenshot, CaptureMethod, AppSettings } from '../types';
 import { colors } from '../theme';
@@ -16,6 +16,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const [isCapturing, setIsCapturing] = useState(false);
     const [selectedScreenshot, setSelectedScreenshot] = useState<Screenshot | null>(null);
     const [viewerVisible, setViewerVisible] = useState(false);
+    const [timerPickerVisible, setTimerPickerVisible] = useState(false);
     const bottomSheetRef = useRef<BottomSheetLib>(null);
     const appState = useRef(AppState.currentState);
 
@@ -68,24 +69,24 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         if (method === 'onscreen') {
             await startOverlayCapture();
         } else {
-            const duration = settings?.timerDuration || 3;
-            Alert.alert('Timer Screenshot', `Screenshot will be taken in ${duration} seconds.\n\nMinimize the app before the timer ends.`, [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Start Timer', onPress: async () => {
-                        const running = await NativeScreenshot.isServiceRunning();
-                        if (running) {
-                            Alert.alert('Already Active', 'The screenshot button is already on your screen. Tap it to capture.');
-                            return;
-                        }
-                        const hasOverlay = await NativeScreenshot.checkOverlayPermission();
-                        if (!hasOverlay) { promptOverlayPermission(); return; }
-                        const soundOn = settings?.soundEnabled ?? true;
-                        await NativeScreenshot.startScreenCapture(soundOn);
-                    }
-                },
-            ]);
+            // Show the timer picker
+            setTimerPickerVisible(true);
         }
+    };
+
+    const handleTimerSelect = async (seconds: number) => {
+        setTimerPickerVisible(false);
+
+        const running = await NativeScreenshot.isServiceRunning();
+        if (running) {
+            Alert.alert('Already Active', 'The screenshot button is already on your screen. Tap it to capture.');
+            return;
+        }
+        const hasOverlay = await NativeScreenshot.checkOverlayPermission();
+        if (!hasOverlay) { promptOverlayPermission(); return; }
+
+        const soundOn = settings?.soundEnabled ?? true;
+        await NativeScreenshot.startTimerCapture(seconds, soundOn);
     };
 
     const startOverlayCapture = async () => {
@@ -130,7 +131,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             { text: 'Cancel', style: 'cancel' },
             {
                 text: 'Delete', style: 'destructive', onPress: async () => {
-                    // Reload after delete
+                    await ScreenshotService.deleteScreenshot(screenshot.uri);
                     handleCloseViewer();
                     await loadScreenshots();
                 }
@@ -162,6 +163,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
                     screenshot={selectedScreenshot}
                     onClose={handleCloseViewer}
                     onDelete={handleDeleteScreenshot}
+                />
+                <TimerPicker
+                    visible={timerPickerVisible}
+                    onSelect={handleTimerSelect}
+                    onClose={() => setTimerPickerVisible(false)}
                 />
             </View>
         </GestureHandlerRootView>

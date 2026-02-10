@@ -99,6 +99,30 @@ class OverlayService : Service() {
             return START_STICKY
         }
 
+        if (intent?.action == "TIMER_CAPTURE") {
+            // Timer mode: show countdown then auto-capture
+            val timerSeconds = intent.getIntExtra("timerSeconds", 3)
+            soundEnabled = intent.getBooleanExtra("soundEnabled", true)
+
+            val resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
+            val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra("data", Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra("data")
+            }
+
+            if (resultCode == Activity.RESULT_OK && data != null && mediaProjection == null) {
+                val notification = createNotification()
+                startForeground(NOTIFICATION_ID, notification)
+                val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                mediaProjection = projectionManager.getMediaProjection(resultCode, data)
+            }
+
+            showCountdownAndCapture(timerSeconds)
+            return START_NOT_STICKY
+        }
+
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
 
@@ -124,6 +148,107 @@ class OverlayService : Service() {
         }
 
         return START_NOT_STICKY
+    }
+
+    private var countdownView: View? = null
+
+    private fun showCountdownAndCapture(totalSeconds: Int) {
+        if (windowManager == null) {
+            windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        }
+
+        val circleSize = dpToPx(120)
+        val container = FrameLayout(this)
+        container.background = createCircleDrawable(Color.parseColor("#CC000000"), circleSize / 2)
+
+        val numberText = TextView(this).apply {
+            text = totalSeconds.toString()
+            setTextColor(Color.WHITE)
+            textSize = 56f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+        container.addView(numberText, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+
+        val params = WindowManager.LayoutParams(
+            circleSize, circleSize,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+
+        countdownView = container
+        try { windowManager?.addView(container, params) } catch (_: Exception) {}
+
+        // Start scale-in animation
+        container.scaleX = 1.5f
+        container.scaleY = 1.5f
+        container.alpha = 0f
+        container.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(300).start()
+
+        val handler = Handler(Looper.getMainLooper())
+        var remaining = totalSeconds
+
+        val tick = object : Runnable {
+            override fun run() {
+                remaining--
+                if (remaining > 0) {
+                    // Update number with animation
+                    numberText.animate().scaleX(0.5f).scaleY(0.5f).alpha(0f).setDuration(150)
+                        .withEndAction {
+                            numberText.text = remaining.toString()
+                            numberText.scaleX = 1.5f
+                            numberText.scaleY = 1.5f
+                            numberText.alpha = 0f
+                            numberText.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(200).start()
+                        }.start()
+                    handler.postDelayed(this, 1000)
+                } else {
+                    // Countdown done — remove overlay IMMEDIATELY then capture after delay
+                    hideCountdown()
+                    // Wait 400ms to ensure overlay is fully gone from screen before capture
+                    handler.postDelayed({ performTimerCapture() }, 400)
+                }
+            }
+        }
+        handler.postDelayed(tick, 1000)
+    }
+
+    private fun hideCountdown() {
+        countdownView?.let {
+            // Remove immediately — no animation — so it doesn't appear in screenshot
+            try { windowManager?.removeView(it) } catch (_: Exception) {}
+        }
+        countdownView = null
+    }
+
+    private fun performTimerCapture() {
+        // Play shutter sound
+        if (soundEnabled) {
+            try { mediaActionSound?.play(MediaActionSound.SHUTTER_CLICK) } catch (_: Exception) {}
+        }
+
+        performCapture { savedUri, savedFile ->
+            Handler(Looper.getMainLooper()).post {
+                if (savedUri != null || savedFile != null) {
+                    lastCapturedUri = savedUri
+                    lastCapturedFile = savedFile
+                    showPreview(savedUri, savedFile)
+                }
+
+                // Timer mode: always stop service after preview auto-hides (6s + 1s buffer)
+                if (overlayView == null) {
+                    Handler(Looper.getMainLooper()).postDelayed({ stopSelf() }, 7000)
+                }
+            }
+        }
     }
 
     private fun setupImageReader() {

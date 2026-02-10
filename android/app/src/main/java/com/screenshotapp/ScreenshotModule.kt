@@ -19,6 +19,7 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
     }
 
     private var pendingSoundEnabled = true
+    private var pendingTimerSeconds = 0  // 0 = normal mode, >0 = timer mode
 
     init {
         reactContext.addActivityEventListener(this)
@@ -38,6 +39,10 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
                     putExtra("resultCode", resultCode)
                     putExtra("data", data)
                     putExtra("soundEnabled", pendingSoundEnabled)
+                    if (pendingTimerSeconds > 0) {
+                        action = "TIMER_CAPTURE"
+                        putExtra("timerSeconds", pendingTimerSeconds)
+                    }
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     reactApplicationContext.startForegroundService(serviceIntent)
@@ -46,7 +51,9 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
                 }
 
                 sendEvent("onCaptureStarted", null)
+                pendingTimerSeconds = 0
             } else {
+                pendingTimerSeconds = 0
                 sendEvent("onCaptureError", Arguments.createMap().apply {
                     putString("error", "User denied screen capture permission")
                 })
@@ -82,6 +89,32 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun startScreenCapture(soundEnabled: Boolean, promise: Promise) {
         pendingSoundEnabled = soundEnabled
+        pendingTimerSeconds = 0
+
+        val activity = reactApplicationContext.currentActivity
+        if (activity == null) {
+            promise.reject("NO_ACTIVITY", "No activity available")
+            return
+        }
+
+        if (!Settings.canDrawOverlays(reactApplicationContext)) {
+            promise.reject("NO_OVERLAY_PERMISSION", "Overlay permission not granted")
+            return
+        }
+
+        val mediaProjectionManager = activity.getSystemService(
+            Context.MEDIA_PROJECTION_SERVICE
+        ) as MediaProjectionManager
+
+        val captureIntent = mediaProjectionManager.createScreenCaptureIntent()
+        activity.startActivityForResult(captureIntent, MEDIA_PROJECTION_REQUEST)
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun startTimerCapture(seconds: Int, soundEnabled: Boolean, promise: Promise) {
+        pendingSoundEnabled = soundEnabled
+        pendingTimerSeconds = seconds
 
         val activity = reactApplicationContext.currentActivity
         if (activity == null) {
