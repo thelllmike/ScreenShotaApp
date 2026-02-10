@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, StyleSheet, Alert, AppState, AppStateStatus } from 'react-native';
 import BottomSheetLib from '@gorhom/bottom-sheet';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Header, ScreenshotGrid, FloatingActionButton, BottomSheet } from '../components';
+import { Header, ScreenshotGrid, FloatingActionButton, BottomSheet, ImageViewer } from '../components';
 import { ScreenshotService, StorageService, NativeScreenshot } from '../services';
 import { Screenshot, CaptureMethod, AppSettings } from '../types';
 import { colors } from '../theme';
@@ -14,6 +14,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const [refreshing, setRefreshing] = useState(false);
     const [settings, setSettings] = useState<AppSettings | null>(null);
     const [isCapturing, setIsCapturing] = useState(false);
+    const [selectedScreenshot, setSelectedScreenshot] = useState<Screenshot | null>(null);
+    const [viewerVisible, setViewerVisible] = useState(false);
     const bottomSheetRef = useRef<BottomSheetLib>(null);
     const appState = useRef(AppState.currentState);
 
@@ -113,7 +115,29 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
     const handleStopCapture = () => { NativeScreenshot.stopScreenCapture(); setIsCapturing(false); };
 
-    const handleScreenshotPress = (screenshot: Screenshot) => Alert.alert('Screenshot', `Size: ${screenshot.size} bytes`);
+    const handleScreenshotPress = (screenshot: Screenshot) => {
+        setSelectedScreenshot(screenshot);
+        setViewerVisible(true);
+    };
+
+    const handleCloseViewer = () => {
+        setViewerVisible(false);
+        setSelectedScreenshot(null);
+    };
+
+    const handleDeleteScreenshot = (screenshot: Screenshot) => {
+        Alert.alert('Delete Screenshot', 'Are you sure you want to delete this screenshot?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Delete', style: 'destructive', onPress: async () => {
+                    // Reload after delete
+                    handleCloseViewer();
+                    await loadScreenshots();
+                }
+            },
+        ]);
+    };
+
     const handleSettingsPress = () => navigation?.navigate('Settings');
     const handleMenuPress = () => {
         if (isCapturing) {
@@ -133,6 +157,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
                     <FloatingActionButton onPress={handleFABPress} />
                 </View>
                 <BottomSheet ref={bottomSheetRef} onSelectMethod={handleSelectMethod} />
+                <ImageViewer
+                    visible={viewerVisible}
+                    screenshot={selectedScreenshot}
+                    onClose={handleCloseViewer}
+                    onDelete={handleDeleteScreenshot}
+                />
             </View>
         </GestureHandlerRootView>
     );
