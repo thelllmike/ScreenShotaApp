@@ -23,14 +23,20 @@ export const NativeScreenshot = {
         }
     },
 
-    startScreenCapture: async (): Promise<boolean> => {
+    startScreenCapture: async (soundEnabled: boolean = true): Promise<boolean> => {
         if (Platform.OS !== 'android' || !ScreenshotModule) return false;
         try {
-            await ScreenshotModule.startScreenCapture();
+            await ScreenshotModule.startScreenCapture(soundEnabled);
             return true;
         } catch (error) {
             console.error('Failed to start screen capture:', error);
             return false;
+        }
+    },
+
+    updateSoundSetting: (soundEnabled: boolean): void => {
+        if (Platform.OS === 'android' && ScreenshotModule) {
+            ScreenshotModule.updateSoundSetting(soundEnabled);
         }
     },
 

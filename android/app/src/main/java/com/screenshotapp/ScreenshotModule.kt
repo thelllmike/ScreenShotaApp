@@ -18,6 +18,8 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
         const val MEDIA_PROJECTION_REQUEST = 1001
     }
 
+    private var pendingSoundEnabled = true
+
     init {
         reactContext.addActivityEventListener(this)
     }
@@ -32,10 +34,10 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
     ) {
         if (requestCode == MEDIA_PROJECTION_REQUEST) {
             if (resultCode == Activity.RESULT_OK && data != null) {
-                // Start the overlay service with the projection data
                 val serviceIntent = Intent(reactApplicationContext, OverlayService::class.java).apply {
                     putExtra("resultCode", resultCode)
                     putExtra("data", data)
+                    putExtra("soundEnabled", pendingSoundEnabled)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     reactApplicationContext.startForegroundService(serviceIntent)
@@ -78,7 +80,9 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun startScreenCapture(promise: Promise) {
+    fun startScreenCapture(soundEnabled: Boolean, promise: Promise) {
+        pendingSoundEnabled = soundEnabled
+
         val activity = reactApplicationContext.currentActivity
         if (activity == null) {
             promise.reject("NO_ACTIVITY", "No activity available")
@@ -97,6 +101,17 @@ class ScreenshotModule(reactContext: ReactApplicationContext) :
         val captureIntent = mediaProjectionManager.createScreenCaptureIntent()
         activity.startActivityForResult(captureIntent, MEDIA_PROJECTION_REQUEST)
         promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun updateSoundSetting(soundEnabled: Boolean) {
+        if (OverlayService.isRunning) {
+            val intent = Intent(reactApplicationContext, OverlayService::class.java).apply {
+                action = "UPDATE_SOUND"
+                putExtra("soundEnabled", soundEnabled)
+            }
+            reactApplicationContext.startService(intent)
+        }
     }
 
     @ReactMethod

@@ -19,17 +19,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
     useEffect(() => { loadScreenshots(); loadSettings(); checkServiceState(); }, []);
 
-    // Listen for app coming back to foreground
     useEffect(() => {
         const subscription = AppState.addEventListener('change', handleAppStateChange);
         return () => subscription.remove();
     }, []);
 
-    // Listen for capture events
     useEffect(() => {
-        const startSub = NativeScreenshot.onCaptureStarted?.(() => {
-            setIsCapturing(true);
-        });
+        const startSub = NativeScreenshot.onCaptureStarted?.(() => setIsCapturing(true));
         const stopSub = NativeScreenshot.onCaptureStopped?.(() => {
             setIsCapturing(false);
             loadScreenshots();
@@ -38,12 +34,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             setIsCapturing(false);
             Alert.alert('Error', err.error);
         });
-
-        return () => {
-            startSub?.remove();
-            stopSub?.remove();
-            errorSub?.remove();
-        };
+        return () => { startSub?.remove(); stopSub?.remove(); errorSub?.remove(); };
     }, []);
 
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -54,10 +45,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         appState.current = nextAppState;
     };
 
-    const checkServiceState = async () => {
-        const running = await NativeScreenshot.isServiceRunning();
-        setIsCapturing(running);
-    };
+    const checkServiceState = async () => setIsCapturing(await NativeScreenshot.isServiceRunning());
 
     const loadSettings = async () => setSettings(await StorageService.getSettings());
     const loadScreenshots = async () => {
@@ -78,24 +66,20 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         if (method === 'onscreen') {
             await startOverlayCapture();
         } else {
-            // Timer method — just take a screenshot after delay, no overlay needed
             const duration = settings?.timerDuration || 3;
-            Alert.alert('Timer Screenshot', `Screenshot will be taken in ${duration} seconds.\n\nMinimize the app before the timer ends to capture what's on screen.`, [
+            Alert.alert('Timer Screenshot', `Screenshot will be taken in ${duration} seconds.\n\nMinimize the app before the timer ends.`, [
                 { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Start Timer', onPress: async () => {
-                        const hasOverlay = await NativeScreenshot.checkOverlayPermission();
-                        if (!hasOverlay) {
-                            promptOverlayPermission();
-                            return;
-                        }
-                        // Check if already running
                         const running = await NativeScreenshot.isServiceRunning();
                         if (running) {
-                            Alert.alert('Already Active', 'The screenshot button is already active on your screen. Tap it to capture.');
+                            Alert.alert('Already Active', 'The screenshot button is already on your screen. Tap it to capture.');
                             return;
                         }
-                        await NativeScreenshot.startScreenCapture();
+                        const hasOverlay = await NativeScreenshot.checkOverlayPermission();
+                        if (!hasOverlay) { promptOverlayPermission(); return; }
+                        const soundOn = settings?.soundEnabled ?? true;
+                        await NativeScreenshot.startScreenCapture(soundOn);
                     }
                 },
             ]);
@@ -103,26 +87,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     };
 
     const startOverlayCapture = async () => {
-        // Check if already running
         const running = await NativeScreenshot.isServiceRunning();
         if (running) {
-            Alert.alert(
-                'Already Active',
-                'The floating screenshot button is already on your screen.\n\n• Tap it to capture a screenshot\n• Drag it to the trash bin to dismiss it',
-                [{ text: 'OK' }]
-            );
+            Alert.alert('Already Active', 'The floating screenshot button is already on your screen.\n\n• Tap it to capture\n• Drag it to the 🗑️ trash to dismiss');
             return;
         }
 
-        // Check overlay permission
         const hasOverlay = await NativeScreenshot.checkOverlayPermission();
-        if (!hasOverlay) {
-            promptOverlayPermission();
-            return;
-        }
+        if (!hasOverlay) { promptOverlayPermission(); return; }
 
-        // Start screen capture
-        const started = await NativeScreenshot.startScreenCapture();
+        const soundOn = settings?.soundEnabled ?? true;
+        const started = await NativeScreenshot.startScreenCapture(soundOn);
         if (!started) {
             Alert.alert('Error', 'Failed to start screen capture. Please try again.');
         }
@@ -132,28 +107,20 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         Alert.alert(
             'Overlay Permission Required',
             'To show the floating screenshot button over other apps, you need to grant overlay permission.\n\nFind "ScreenshotApp" and enable "Allow display over other apps".',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Open Settings', onPress: () => NativeScreenshot.requestOverlayPermission() },
-            ]
+            [{ text: 'Cancel', style: 'cancel' }, { text: 'Open Settings', onPress: () => NativeScreenshot.requestOverlayPermission() }]
         );
     };
 
-    const handleStopCapture = () => {
-        NativeScreenshot.stopScreenCapture();
-        setIsCapturing(false);
-    };
+    const handleStopCapture = () => { NativeScreenshot.stopScreenCapture(); setIsCapturing(false); };
 
     const handleScreenshotPress = (screenshot: Screenshot) => Alert.alert('Screenshot', `Size: ${screenshot.size} bytes`);
     const handleSettingsPress = () => navigation?.navigate('Settings');
     const handleMenuPress = () => {
         if (isCapturing) {
-            Alert.alert('Capture Running', 'The floating screenshot button is active on your screen.', [
+            Alert.alert('Capture Running', 'The floating button is active.', [
                 { text: 'Keep Running' },
                 { text: 'Stop & Remove', style: 'destructive', onPress: handleStopCapture },
             ]);
-        } else {
-            Alert.alert('Menu', 'Menu options will be available here.');
         }
     };
 

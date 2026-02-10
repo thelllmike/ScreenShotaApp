@@ -1,21 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, StatusBar } from 'react-native';
 import { colors, spacing, borderRadius, typography } from '../theme';
-import { StorageService } from '../services';
+import { StorageService, NativeScreenshot } from '../services';
 import { AppSettings } from '../types';
 
 interface SettingsScreenProps { navigation?: any; }
 
 const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
-    const [settings, setSettings] = useState<AppSettings>({ saveToGallery: true, timerDuration: 3, captureMethod: 'timer' });
+    const [settings, setSettings] = useState<AppSettings>({ saveToGallery: true, timerDuration: 3, captureMethod: 'timer', soundEnabled: true });
 
     useEffect(() => { loadSettings(); }, []);
 
     const loadSettings = async () => setSettings(await StorageService.getSettings());
 
     const updateSetting = async (key: keyof AppSettings, value: any) => {
-        setSettings((prev) => ({ ...prev, [key]: value }));
+        const newSettings = { ...settings, [key]: value };
+        setSettings(newSettings);
         await StorageService.saveSettings({ [key]: value });
+
+        // If sound setting changed, update running service too
+        if (key === 'soundEnabled') {
+            NativeScreenshot.updateSoundSetting(value as boolean);
+        }
     };
 
     return (
@@ -41,11 +47,25 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation }) => {
                         </View>
                     </View>
                 </View>
+
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>CAPTURE</Text>
+                    <View style={styles.card}>
+                        <View style={styles.settingRow}>
+                            <View style={styles.settingTextContainer}>
+                                <Text style={styles.settingTitle}>🔊 Shutter Sound</Text>
+                                <Text style={styles.settingSubtitle}>{settings.soundEnabled ? 'Camera click plays when capturing' : 'Silent capture mode'}</Text>
+                            </View>
+                            <Switch value={settings.soundEnabled} onValueChange={(value) => updateSetting('soundEnabled', value)} trackColor={{ false: colors.border, true: colors.primary }} thumbColor={colors.white} />
+                        </View>
+                    </View>
+                </View>
+
                 <View style={styles.infoCard}>
                     <Text style={styles.infoIcon}>💡</Text>
                     <View style={styles.infoTextContainer}>
-                        <Text style={styles.infoTitle}>Privacy Tip</Text>
-                        <Text style={styles.infoText}>When "Save to Gallery" is off, screenshots are stored privately and only visible within this app.</Text>
+                        <Text style={styles.infoTitle}>Tips</Text>
+                        <Text style={styles.infoText}>• After capturing, use the popup to share or edit{'\n'}• Drag the floating button to 🗑️ trash to dismiss it{'\n'}• Sound setting applies immediately, even mid-capture</Text>
                     </View>
                 </View>
             </ScrollView>

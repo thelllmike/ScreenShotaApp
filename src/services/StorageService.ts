@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppSettings } from '../types';
 
 const SETTINGS_KEY = '@screenshot_app_settings';
-const DEFAULT_SETTINGS: AppSettings = { saveToGallery: true, timerDuration: 3, captureMethod: 'timer' };
+const DEFAULT_SETTINGS: AppSettings = { saveToGallery: true, timerDuration: 3, captureMethod: 'timer', soundEnabled: true };
 
 export const StorageService = {
     getSettings: async (): Promise<AppSettings> => {

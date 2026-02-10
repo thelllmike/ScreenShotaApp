@@ -13,4 +13,5 @@ export interface AppSettings {
     saveToGallery: boolean;
     timerDuration: number;
     captureMethod: CaptureMethod;
+    soundEnabled: boolean;
 }
